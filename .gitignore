@@ -1,0 +1,6 @@
+.git/
+.secret_git
+target/
+Cargo.lock
+src/settings.json
+src/*.log
