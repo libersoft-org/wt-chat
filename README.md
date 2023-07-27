@@ -1,4 +1,4 @@
-# WebTransport chat
+# WebTransport Chat - server and client application
 
 This is a simple chat server and client software using [**WebTransport**](https://github.com/BiagioFesta/wtransport).
 
