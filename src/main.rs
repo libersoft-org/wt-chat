@@ -1,49 +1,94 @@
-use wtransport::{Endpoint, ServerConfig, Result, Stream};
-use tokio::fs::File;
-use tokio::io::{AsyncWriteExt, AsyncReadExt};
-use std::path::Path;
-use rustls::internal::pemfile::{certs, rsa_private_keys};
-use rustls::{NoClientAuth, ServerConfig as RustlsServerConfig};
-use std::fs::File as StdFile;
-use std::io::BufReader;
+use wtransport::{ServerConfig, Endpoint};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::fs::File;
+use std::io::Read;
+
+async fn receive_message(recv_stream: &mut (impl AsyncReadExt + Unpin)) -> Result<String, Box<dyn std::error::Error>> {
+ let mut buffer = Vec::new();
+ recv_stream.read_to_end(&mut buffer).await?;
+ let message = String::from_utf8(buffer)?;
+ Ok(message)
+}
+
+async fn send_message(send_stream: &mut (impl AsyncWriteExt + Unpin), message: &str) -> Result<(), Box<dyn std::error::Error>> {
+ send_stream.write_all(message.as_bytes()).await?;
+ Ok(())
+}
+
+async fn receive_file(recv_stream: &mut (impl AsyncReadExt + Unpin), file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+ let mut file_buffer = Vec::new();
+ recv_stream.read_to_end(&mut file_buffer).await?;
+ let mut file = File::create(file_path)?;
+ file.write_all(&file_buffer)?;
+ Ok(())
+}
+
+async fn send_file(send_stream: &mut (impl AsyncWriteExt + Unpin), file_path: &str) -> Result<(), Box<dyn std::error::Error>> {
+ let mut file = File::open(file_path)?;
+ let mut file_buffer = Vec::new();
+ file.read_to_end(&mut file_buffer)?;
+ send_stream.write_all(&file_buffer).await?;
+ Ok(())
+}
 
 #[tokio::main]
-async fn main() -> Result<()> {
- // Load public and private keys
- let cert_file = &mut BufReader::new(StdFile::open("cert.pem").unwrap());
- let key_file = &mut BufReader::new(StdFile::open("key.pem").unwrap());
- let cert = certs(cert_file).unwrap();
- let mut keys = rsa_private_keys(key_file).unwrap();
+async fn main() {
+ let mut certificate = Vec::new();
+ if File::open("path/to/your/certificate.pem").unwrap().read_to_end(&mut certificate).is_err() {
+  println!("Failed to read certificate");
+  return;
+ }
 
- let mut config = RustlsServerConfig::new(NoClientAuth::new());
- config.set_single_cert(cert, keys.remove(0)).unwrap();
+ let config = match ServerConfig::builder()
+  .with_bind_address("[::1]:4433".parse().unwrap())
+  .with_certificate(certificate)
+  .build() {
+   Ok(config) => config,
+   Err(_) => {
+    println!("Failed to create server config");
+    return;
+   }
+  };
 
- let config = ServerConfig::builder()
-  .with_bind_address("[::]:4433".parse()?)
-  .with_tls_config(config)
-  .build();
-
- let connection = Endpoint::server(config)?
+ let connection = match Endpoint::server(config).unwrap()
   .accept()
-  .await     // Awaits connection
-  .await?    // Awaits session request
+  .await.unwrap()     // Awaits connection
+  .await.unwrap()    // Awaits session request
   .accept()  // Accepts request
-  .await?;   // Awaits ready session
+  .await {   // Awaits ready session
+   Ok(connection) => connection,
+   Err(_) => {
+    println!("Failed to establish connection");
+    return;
+   }
+  };
 
- // Echo messages
- let mut send_stream = connection.create_send_stream().await?;
- let mut receive_stream = connection.accept_receive_stream().await?;
- let mut buffer = vec![0; 1024];
- let n = receive_stream.read(&mut buffer).await?;
- send_stream.write_all(&buffer[..n]).await?;
+ let (mut send_stream, mut recv_stream) = match connection.accept_bi().await {
+  Ok(stream) => stream.split(),
+  Err(_) => {
+   println!("Failed to accept bidirectional stream");
+   return;
+  }
+ };
 
- // File save
- let mut bi_stream = connection.accept_bi().await?;
- let mut file_name = String::new();
- bi_stream.read_to_string(&mut file_name).await?;
- let mut file = File::create(Path::new(&file_name)).await?;
- let n = bi_stream.read(&mut buffer).await?;
- file.write_all(&buffer[..n]).await?;
+ // Receiving a message
+ match receive_message(&mut recv_stream).await {
+  Ok(message) => println!("Received message: {}", message),
+  Err(_) => println!("Failed to receive message"),
+ }
 
- Ok(())
+ // Sending a message
+ if send_message(&mut send_stream, "Hello from server").await.is_err() {
+  println!("Failed to send message");
+ }
+
+ // Receiving a file
+ if receive_file(&mut recv_stream, "received_file").await.is_err() {
+  println!("Failed to receive file");
+ }
+
+ // Sending a file
+ if send_file(&mut send_stream, "path/to/your/file").await.is_err() {
+  println!("Failed to send file");
+ }
 }
