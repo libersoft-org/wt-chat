@@ -1,0 +1,3 @@
+- Cargo.toml - choose only tokio packages that are used in app
+- logging function instead of println
+- create a class for handling webtransport

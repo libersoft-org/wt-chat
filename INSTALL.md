@@ -35,6 +35,26 @@ certbot certonly --standalone --register-unsafely-without-email --agree-tos -d c
 
 (replace "**chat.domain.tld**" with your actual domain name)
 
+Alternatively you can create your self-signed certificate:
+
+```sh
+openssl req -newkey rsa:2048 -new -nodes -x509 -days $(expr '(' $(date -d 2999/01/01 +%s) - $(date +%s) + 86399 ')' / 86400) -subj "/" -keyout key.pem -out cert.pem
+```
+
+... but the browser will not accept it by default. You can run the browser with parameter that will ignore certificate errors, but first create your fingerprint:
+
+```sh
+openssl x509 -pubkey -noout -in cert.pem | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64
+```
+
+... and then run your browser:
+
+```sh
+chrome --ignore-certificate-errors-spki-list=FINGERPRINT --ignore-certificate-errors --v=2 --enable-logging=stderr --origin-to-force-quic-on=SERVER:PORT
+```
+
+(replace **FINGERPRINT**, **SERVER** and **PORT** with your actual values)
+
 5. Create a config file in **src/settings.json**
 
 ```json
